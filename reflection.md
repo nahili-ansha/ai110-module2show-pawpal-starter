@@ -34,8 +34,9 @@ Why? initially has_time_for() function doesn't track the remaining time and avai
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+The scheduler considers two primary constraints: time budget (the owner's available minutes for the day) and task priority (high/medium/low). It also uses scheduled_time as an optional soft constraint for display ordering, and recurrence as a forward-planning constraint that generates future tasks automatically.
+
+Priority was weighted most heavily because a pet missing meds or a meal is a real welfare issue, those tasks need to run even if time is tight. Time budget was the hard cutoff: no matter how many tasks exist, the plan cannot exceed what the owner can realistically do. Scheduled time and recurrence were treated as secondary because they affect organization and planning, not the immediate daily decision of what gets done.
 
 **b. Tradeoffs**
 
@@ -49,13 +50,19 @@ This is a reasonable  because pet care tasks are typically assigned to named tim
 
 **a. How you used AI**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+I used Copilot as my primary AI collaborator throughout the project. It was most effective in three phases:
+
+- **Implementation support** — I described what I wanted each method to do in plain English ("filter tasks by completion status," "sort by HH:MM time") and Copilot translated those into correct Python with the right data structures. This was faster than writing boilerplate from scratch and let me focus on whether the logic was right rather than syntax.
+- **Debugging** — When the Streamlit app threw `AttributeError: 'NoneType' object has no attribute 'pets'`, I pasted the traceback and Copilot diagnosed that `st.stop()` wasn't preventing execution and restructured the guard correctly.
+- **Incremental feature building** — Each feature (recurrence, conflict detection, UI components) was added in a focused conversation. Copilot explained the tradeoff of each approach before writing the code, which helped me understand what I was accepting.
+
+The most effective prompts were specific and outcome-focused: "add a method that returns tasks sorted chronologically, tasks with no time go last" produced better results than open-ended requests like "improve the scheduler."
 
 **b. Judgment and verification**
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+When Copilot first implemented `next_occurrence()`, it always used `date.today()` as the base date for calculating the next due date. I noticed this would be wrong for chained completions — if you completed a daily task twice on the same day, both new tasks would get tomorrow's date instead of day+1 and day+2.
+
+I asked Copilot to fix it to use `self.due_date` as the base when it exists, falling back to `date.today()` only when no due date is set. I verified this by tracing through the logic manually: complete task with `due_date=2026-03-29` → next due is `2026-03-30` → complete that → next due is `2026-03-31`. I then added the chain completion test in `test_pawpal.py` to lock in this behavior so it couldn't regress.
 
 ---
 
@@ -63,13 +70,15 @@ This is a reasonable  because pet care tasks are typically assigned to named tim
 
 **a. What you tested**
 
-- What behaviors did you test?
-- Why were these tests important?
+I tested five behavioral areas: task completion status, task addition, chronological sorting, recurrence logic, and conflict detection. Each test was written to verify one specific outcome — for example, that completing a daily task produces exactly one new task with a due date of tomorrow, not two, and not with today's date.
+
+These tests mattered because the features interact. Recurrence calls `mark_complete()` internally; conflict detection reads from `pet.tasks` which is also modified by `complete_task()`. Testing each behavior in isolation made it possible to trust that when something broke, the failing test would point directly at the cause rather than somewhere downstream.
 
 **b. Confidence**
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+⭐⭐⭐⭐ (4 / 5)
+
+The scheduling logic, recurrence, sorting, and conflict detection all work correctly for the cases I tested. My confidence drops slightly for two reasons: the conflict detector only catches exact time-slot matches and would miss a 30-minute task at 08:00 overlapping a task at 08:15, and the Streamlit UI has no automated tests — regressions there would only surface manually. Given more time I would test: completing a recurring task with no `due_date` set, tasks whose total duration exactly equals `available_minutes`, and generating a schedule when all tasks are already completed.
 
 ---
 
@@ -77,12 +86,12 @@ This is a reasonable  because pet care tasks are typically assigned to named tim
 
 **a. What went well**
 
-- What part of this project are you most satisfied with?
+The recurrence system is the part I'm most satisfied with. The design — `next_occurrence()` on `Task`, `complete_task()` on `Pet`, `mark_task_complete()` on `Scheduler` delegating down — keeps each class responsible for only what it owns. `Task` knows how to copy itself. `Pet` knows how to append to its own list. `Scheduler` doesn't need to know about either. That separation made it easy to test each piece independently and meant adding recurrence didn't require touching the core scheduling algorithm at all.
 
 **b. What you would improve**
 
-- If you had another iteration, what would you improve or redesign?
+I would replace the exact time-match conflict detector with a proper duration-overlap check. The current approach compares `scheduled_time` strings, so two tasks at `"08:00"` conflict but a 60-minute task at `"08:00"` and a task at `"08:45"` do not — even though they clearly overlap. The fix would convert `HH:MM` to total minutes since midnight and check whether `[start, start + duration]` intervals intersect, which is a standard range-overlap problem: two ranges overlap if `start_a < end_b and start_b < end_a`.
 
 **c. Key takeaway**
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+The most important thing I learned is that AI is a powerful implementer but a poor architect — and those are different jobs. Copilot could write a correct `next_occurrence()` method in seconds, but it couldn't know that the base date should chain from `self.due_date` rather than always rebasing to today until I thought through the behavior myself and caught the issue. Every time I accepted AI output without reading it, I risked building on a subtly wrong assumption. The lead architect's job is not to write every line — it's to define what "correct" means, verify that the code matches that definition, and push back when it doesn't. That judgment can't be delegated.

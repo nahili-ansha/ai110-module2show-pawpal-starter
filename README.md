@@ -22,6 +22,23 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## 📸 Demo
+
+![PawPal+ Streamlit app demo](pawpal+.gif)
+
+## Features
+
+| Feature | Algorithm / Logic | Where in code |
+|---|---|---|
+| **Priority scheduling** | Greedy sort — tasks ranked high→medium→low, scheduled in order until the owner's time budget runs out | `Scheduler.generate_plan()` |
+| **Sorting by time** | `sorted()` with a lambda key on `HH:MM` strings; tasks with no time set use `"99:99"` as a fallback so they always land last | `Pet.get_tasks_sorted_by_time()` |
+| **Status filtering** | List comprehensions filtering on `task.completed`; one focused method per use case plus a general `filter_tasks_by_status(bool)` | `Pet.get_pending_tasks()`, `get_completed_tasks()`, `filter_tasks_by_status()` |
+| **Filter by pet name** | Iterates `owner.pets` with a case-insensitive name match, returns that pet's task list or `[]` | `Owner.get_tasks_for_pet(name)` |
+| **Daily recurrence** | On completion, `next_occurrence()` builds a fresh `Task` copy with `due_date = current due_date + 1 day` using `timedelta(days=1)` | `Task.next_occurrence()`, `Pet.complete_task()` |
+| **Weekly recurrence** | Same as daily but `timedelta(days=7)`; base date chains from the completed task so repeated completions advance correctly | `Task.next_occurrence()`, `Pet.complete_task()` |
+| **Conflict warnings** | Groups all pending tasks by `scheduled_time` into a dict; any slot with more than one task is a conflict | `Scheduler.detect_conflicts()`, `explain_conflicts()` |
+| **Time budget tracking** | Running `time_used` counter checked before each task with `has_time_for()`; tasks that don't fit are moved to a `_skipped` list | `Scheduler.generate_plan()`, `Owner.has_time_for()` |
+
 ## Smarter Scheduling
 
 Beyond the basic priority-based daily plan, PawPal+ includes several logic improvements:
