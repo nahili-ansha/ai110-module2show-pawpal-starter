@@ -39,8 +39,9 @@ Why? initially has_time_for() function doesn't track the remaining time and avai
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+The conflict detector checks for exact scheduled_time matches (e.g., both tasks say 08:00) than checking whether task durations overlap (e.g., a 30-minute task at 08:00 and a 20-minute task at 08:15 would overlap in real life but undetected).
+
+This is a reasonable  because pet care tasks are typically assigned to named time slots like "morning walk," "breakfast," "evening meds"  than precise start times down to the minute. Implementing full duration-overlap detection would require converting HH:MM strings into comparable time objects, calculating end times, and checking range intersections which is more complex given how pet owners actually plan their day.
 
 ---
 

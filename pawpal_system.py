@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
-from typing import List
+from datetime import date, timedelta
+from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -9,6 +10,9 @@ class Task:
     priority: str       # "low", "medium", "high"
     task_type: str      # "walk", "feeding", "meds", "grooming", "enrichment", etc.
     completed: bool = False
+    scheduled_time: str = ""        # optional "HH:MM" format, e.g. "08:30"
+    recurrence: str = ""            # "", "daily", or "weekly"
+    due_date: Optional[date] = None # set automatically on recurring tasks
 
     def priority_value(self) -> int:
         """Convert priority string to a number for sorting (high=3, medium=2, low=1)."""
@@ -19,12 +23,29 @@ class Task:
         """Mark this task as completed."""
         self.completed = True
 
+    def next_occurrence(self) -> "Task":
+        """Return a fresh copy of this task due on the next occurrence date."""
+        intervals = {"daily": 1, "weekly": 7}
+        days_ahead = intervals.get(self.recurrence, 1)
+        base = self.due_date if self.due_date else date.today()
+        next_due = base + timedelta(days=days_ahead)
+        return Task(
+            title=self.title,
+            duration_minutes=self.duration_minutes,
+            priority=self.priority,
+            task_type=self.task_type,
+            scheduled_time=self.scheduled_time,
+            recurrence=self.recurrence,
+            due_date=next_due,
+        )
+
     def __repr__(self) -> str:
-        """Return a formatted string showing priority, title, duration, type, and status."""
+        """Return a formatted string showing priority, title, duration, type, status, and due date."""
         status = "done" if self.completed else "pending"
+        due = f", due {self.due_date}" if self.due_date else ""
         return (
             f"[{self.priority.upper()}] {self.title} "
-            f"({self.duration_minutes} min, {self.task_type}) — {status}"
+            f"({self.duration_minutes} min, {self.task_type}) — {status}{due}"
         )
 
 
@@ -39,6 +60,16 @@ class Pet:
         """Attach a care task to this pet."""
         self.tasks.append(task)
 
+    def complete_task(self, title: str) -> None:
+        """Mark a task complete by title. If it recurs, append the next occurrence."""
+        for task in self.tasks:
+            if task.title == title and not task.completed:
+                task.mark_complete()
+                if task.recurrence in ("daily", "weekly"):
+                    self.tasks.append(task.next_occurrence())
+                return
+        raise ValueError(f"No pending task named '{title}' found for {self.name}.")
+
     def remove_task(self, title: str) -> None:
         """Remove a task by title."""
         self.tasks = [t for t in self.tasks if t.title != title]
@@ -46,6 +77,21 @@ class Pet:
     def get_pending_tasks(self) -> List[Task]:
         """Return only tasks that have not been completed."""
         return [t for t in self.tasks if not t.completed]
+
+    def get_completed_tasks(self) -> List[Task]:
+        """Return only tasks that have been completed."""
+        return [t for t in self.tasks if t.completed]
+
+    def filter_tasks_by_status(self, completed: bool) -> List[Task]:
+        """Return tasks matching the given completion status."""
+        return [t for t in self.tasks if t.completed == completed]
+
+    def get_tasks_sorted_by_time(self) -> List[Task]:
+        """Return tasks sorted by scheduled_time (HH:MM). Tasks with no time set go last."""
+        return sorted(
+            self.tasks,
+            key=lambda t: t.scheduled_time if t.scheduled_time else "99:99"
+        )
 
     def get_info(self) -> str:
         """Return a readable summary of the pet."""
@@ -80,6 +126,13 @@ class Owner:
     def get_all_pending_tasks(self) -> List[Task]:
         """Return all incomplete tasks across all pets."""
         return [t for t in self.get_all_tasks() if not t.completed]
+
+    def get_tasks_for_pet(self, pet_name: str) -> List[Task]:
+        """Return all tasks for the pet with the given name, or [] if not found."""
+        for pet in self.pets:
+            if pet.name.lower() == pet_name.lower():
+                return pet.tasks
+        return []
 
     def has_time_for(self, task: Task, time_used: int) -> bool:
         """Return True if the task fits within the remaining available time."""
@@ -139,12 +192,60 @@ class Scheduler:
             lines.append("")
             lines.append("All tasks fit within the time budget.")
 
+        conflicts = self.detect_conflicts()
+        if conflicts:
+            lines.append("")
+            lines.append("⚠ Conflicts detected:")
+            for slot, entries in conflicts:
+                names = ", ".join(f"{p}: {t.title}" for p, t in entries)
+                lines.append(f"  {slot} → {names}")
+
+        return "\n".join(lines)
+
+    def detect_conflicts(self) -> List[Tuple[str, List[Tuple[str, Task]]]]:
+        """Return a list of time-slot conflicts across all pets.
+
+        Each entry is (time_slot, [(pet_name, task), ...]) for slots where
+        more than one task is scheduled at the same time.
+        """
+        # Build a dict: scheduled_time -> list of (pet_name, task) pairs
+        time_map: Dict[str, List[Tuple[str, Task]]] = {}
+        for pet in self.owner.pets:
+            for task in pet.tasks:
+                if not task.scheduled_time or task.completed:
+                    continue
+                if task.scheduled_time not in time_map:
+                    time_map[task.scheduled_time] = []
+                time_map[task.scheduled_time].append((pet.name, task))
+
+        # Keep only slots with more than one task
+        return [
+            (slot, entries)
+            for slot, entries in sorted(time_map.items())
+            if len(entries) > 1
+        ]
+
+    def explain_conflicts(self) -> str:
+        """Return a human-readable conflict report."""
+        conflicts = self.detect_conflicts()
+        if not conflicts:
+            return "No scheduling conflicts detected."
+
+        lines = ["=== Scheduling Conflicts ==="]
+        for slot, entries in conflicts:
+            lines.append(f"\n  {slot} — {len(entries)} tasks overlap:")
+            for pet_name, task in entries:
+                lines.append(f"    [{pet_name}] {task.title} ({task.duration_minutes} min)")
         return "\n".join(lines)
 
     def mark_task_complete(self, title: str) -> None:
-        """Mark a scheduled task as complete by title."""
+        """Mark a scheduled task complete by title, triggering recurrence if set."""
         for task in self._plan:
             if task.title == title:
-                task.mark_complete()
-                return
+                # Find which pet owns this task and use complete_task() so
+                # recurrence logic runs in one place (Pet.complete_task).
+                for pet in self.owner.pets:
+                    if task in pet.tasks:
+                        pet.complete_task(title)
+                        return
         raise ValueError(f"Task '{title}' not found in the current plan.")
