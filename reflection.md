@@ -20,8 +20,13 @@ My initial design consists of four classes. Owner stores the owner's name and da
 
 **b. Design changes**
 
-- Did your design change during implementation?
+- Did your design change during implementation? yes
 - If yes, describe at least one change and why you made it.
+
+The Scheduler now has self.remaining_minutes which starts at owner.available_minutes and gets decremented in generate_plan() to track the time budget properly
+
+Why? initially has_time_for() function doesn't track the remaining time and available_time never decreases , so calling it twice with 2 tasks could say yes to both even if they exceed the budget
+
 
 ---
 
